@@ -1,0 +1,69 @@
+---
+title: "Install cPanelSniper: Requirements and Setup Steps"
+description: "Install cPanelSniper with a single git clone. Requires Python 3.8+ and no pip packages — pure stdlib only. Works on Linux and macOS."
+---
+
+cPanelSniper ships as a single Python file with zero external dependencies. Installation is a single `git clone` followed by a direct invocation with `python3` — no virtual environment, no pip install, no package manager configuration required. The tool runs on any system with Python 3.8 or later, which is pre-installed on most modern Linux and macOS distributions.
+
+## Prerequisites
+
+Before cloning the repository, verify that your system meets the minimum requirements.
+
+| Requirement | Minimum version | Notes |
+|-------------|----------------|-------|
+| Python | 3.8+ | Uses only stdlib: `ssl`, `urllib`, `json`, `argparse`, `threading`, `concurrent.futures` |
+| git | Any recent version | For cloning the repository |
+| Network access | — | HTTPS to port 2087 (WHM) on target hosts |
+
+<Info>
+  No pip packages are required. cPanelSniper uses only Python's built-in standard library modules.
+</Info>
+
+## Installation steps
+
+<Steps>
+  <Step title="Clone the repository">
+    Clone cPanelSniper from GitHub to your local machine:
+
+    ```bash
+    git clone https://github.com/ynsmroztas/cPanelSniper
+    ```
+
+    This creates a `cPanelSniper/` directory containing `cPanelSniper.py` and supporting files.
+  </Step>
+
+  <Step title="Change into the directory">
+    Navigate into the cloned directory:
+
+    ```bash
+    cd cPanelSniper
+    ```
+  </Step>
+
+  <Step title="Verify the installation">
+    Run the tool with `--help` to confirm Python can execute it and to see the full flag reference:
+
+    ```bash
+    python3 cPanelSniper.py --help
+    ```
+
+    You should see the cPanelSniper banner followed by the complete usage output, including all target, scan, post-exploit, and output flags.
+  </Step>
+</Steps>
+
+## Why no pip is required
+
+cPanelSniper deliberately avoids third-party packages to maximize portability. Every module it imports ships with Python itself:
+
+- `ssl` — TLS connections with hostname verification disabled for self-signed cPanel certificates
+- `urllib.request` / `urllib.error` — raw HTTP/HTTPS with full control over redirects and `Set-Cookie` headers
+- `json` — parsing WHM API responses
+- `argparse` — CLI flag parsing
+- `threading` / `concurrent.futures` — multi-target concurrent scanning
+- `re`, `datetime`, `os`, `sys`, `signal` — standard utilities
+
+This means cPanelSniper works immediately on a fresh Linux VPS, a macOS machine, or inside a minimal Docker container — anywhere Python 3.8+ is available.
+
+<Tip>
+  If your system's default `python3` is older than 3.8, install a newer version via your package manager (`apt install python3.11`, `brew install python@3.11`) and invoke with the versioned binary: `python3.11 cPanelSniper.py --help`.
+</Tip>

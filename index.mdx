@@ -1,133 +1,76 @@
 ---
-title: "Introduction"
-description: "Welcome to the new home for your documentation"
-icon: 'star'
+title: "cPanelSniper: CVE-2026-41940 Exploitation Framework"
+description: "cPanelSniper automates the 4-stage CVE-2026-41940 exploit chain for cPanel & WHM authentication bypass via CRLF injection. Pure Python, no dependencies."
 ---
 
-## Setting up
+cPanelSniper is a focused exploitation framework for **CVE-2026-41940**, a critical (CVSS 10.0) authentication bypass affecting cPanel & WHM. The vulnerability allows unauthenticated attackers to gain root-level WHM access by injecting CRLF sequences into the session file via the `Authorization` HTTP header — with zero valid credentials required. cPanelSniper automates the entire exploit chain and includes an interactive post-exploitation shell, bulk scanning, and pipeline support — all using pure Python 3.8+ stdlib.
 
-Get your documentation site up and running in minutes.
+<Warning>
+  This tool is intended for **authorized security testing** and **bug bounty programs only**. Unauthorized access to computer systems is illegal. Always obtain proper written authorization before testing any system.
+</Warning>
 
-<Card
-  title="Start here"
-  icon="rocket"
-  href="/quickstart"
-  horizontal
->
-  Follow our three step quickstart guide.
-</Card>
-
-## Make it yours
-
-Design a docs site that looks great and empowers your users.
-
-<Columns cols={2}>
-  <Card
-    title="Edit locally"
-    icon="pen-to-square"
-    href="/development"
-  >
-    Edit your docs locally and preview them in real time.
+<CardGroup cols={2}>
+  <Card title="Installation" icon="download" href="/installation">
+    Clone and run — no pip install required. Pure Python 3.8+ stdlib only.
   </Card>
-  <Card
-    title="Customize your site"
-    icon="palette"
-    href="/essentials/settings"
-  >
-    Customize the design and colors of your site to match your brand.
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Scan your first target and confirm CVE-2026-41940 vulnerability in minutes.
   </Card>
-    <Card
-    title="Set up navigation"
-    icon="map"
-    href="/essentials/navigation"
-  >
-    Organize your docs to help users find what they need and succeed with your product.
+  <Card title="The Vulnerability" icon="bug" href="/vulnerability/overview">
+    Understand the CRLF injection root cause in cPanel's Session.pm.
   </Card>
-  <Card
-    title="API documentation"
-    icon="terminal"
-    href="/api-reference/introduction"
-  >
-    Auto-generate API documentation from OpenAPI specifications.
+  <Card title="CLI Reference" icon="terminal" href="/reference/cli-flags">
+    Complete flag reference for all scan, post-exploit, and output options.
   </Card>
-</Columns>
+</CardGroup>
 
-## Create beautiful pages
+## What cPanelSniper does
 
-Everything you need to create world-class documentation.
+cPanelSniper executes a precise 4-stage exploit chain against cPanel & WHM targets to confirm and exploit CVE-2026-41940:
 
-<Columns cols={2}>
-  <Card
-    title="Write with MDX"
-    icon="pen-fancy"
-    href="/essentials/markdown"
-  >
-    Use MDX to style your docs pages.
-  </Card>
-  <Card
-    title="Code samples"
-    icon="code"
-    href="/essentials/code"
-  >
-    Add sample code to demonstrate how to use your product.
-  </Card>
-  <Card
-    title="Images"
-    icon="image"
-    href="/essentials/images"
-  >
-    Display images and other media.
-  </Card>
-  <Card
-    title="Reusable snippets"
-    icon="recycle"
-    href="/essentials/reusable-snippets"
-  >
-    Write once and reuse across your docs.
-  </Card>
-</Columns>
+<Steps>
+  <Step title="Canonical hostname discovery">
+    Automatically discovers the real server hostname via a cpsrvd 307 redirect — preventing Host header mismatches that would break the exploit.
+  </Step>
+  <Step title="Mint a preauth session">
+    Issues a POST to `/login/?login_only=1` with intentionally wrong credentials to obtain a `whostmgrsession` cookie without authentication.
+  </Step>
+  <Step title="CRLF injection">
+    Sends a crafted `Authorization: Basic` header containing CRLF-separated session fields. cPanel's `saveSession()` writes these verbatim into the on-disk session file before sanitization runs.
+  </Step>
+  <Step title="Propagate and verify">
+    Triggers the `do_token_denied` gadget to flush the raw session into the cache, then verifies WHM root access via `/json-api/version`.
+  </Step>
+</Steps>
 
-## Make your content agent ready
+## Key features
 
-Make your docs work for humans and AI agents alike.
+<CardGroup cols={2}>
+  <Card title="Interactive WHM Shell" icon="display" href="/usage/interactive-shell">
+    Drop into a full interactive shell with commands for account management, file reads, OS execution, and raw API calls.
+  </Card>
+  <Card title="Bulk Scanning" icon="list" href="/usage/scanning">
+    Scan thousands of targets concurrently with configurable thread counts and JSON output.
+  </Card>
+  <Card title="Pipeline Ready" icon="pipe-section" href="/usage/pipelines">
+    Reads targets from stdin — chain with subfinder, httpx, and Shodan for automated recon-to-exploit workflows.
+  </Card>
+  <Card title="Post-Exploit Actions" icon="shield-halved" href="/usage/post-exploit">
+    List accounts, change root password, execute OS commands, or create backdoor admin users after a successful bypass.
+  </Card>
+</CardGroup>
 
-<Columns cols={2}>
-  <Card
-    title="Prompt component"
-    icon="robot"
-    href="/agent-ready/prompt"
-  >
-    Embed shareable AI prompts readers can copy or open in Cursor.
-  </Card>
-  <Card
-    title="Visibility"
-    icon="eye"
-    href="/agent-ready/visibility"
-  >
-    Show different content to humans and agents reading your docs.
-  </Card>
-  <Card
-    title="Contextual menu"
-    icon="bolt"
-    href="/agent-ready/contextual"
-  >
-    Give readers one-click access to Claude, ChatGPT, Cursor, and more.
-  </Card>
-  <Card
-    title="AI coding tools"
-    icon="wand-magic-sparkles"
-    href="/ai-tools/claude-code"
-  >
-    Set up Claude Code, Cursor, or Windsurf with Mintlify's skill.
-  </Card>
-</Columns>
+## Affected versions
 
-## Need inspiration?
+| Branch | Vulnerable | Patched |
+|--------|-----------|---------|
+| 110.x | ≤ 11.110.0.96 | **11.110.0.97** |
+| 118.x | ≤ 11.118.0.62 | **11.118.0.63** |
+| 126.x | ≤ 11.126.0.53 | **11.126.0.54** |
+| 132.x | ≤ 11.132.0.28 | **11.132.0.29** |
+| 134.x | ≤ 11.134.0.19 | **11.134.0.20** |
+| 136.x | ≤ 11.136.0.4  | **11.136.0.5**  |
 
-<Card
-  title="See complete examples"
-  icon="stars"
-  href="https://mintlify.com/customers"
->
-  Browse our showcase of exceptional documentation sites.
-</Card>
+<Info>
+  In-the-wild exploitation of CVE-2026-41940 was confirmed in April 2026. Approximately 70 million domains run cPanel & WHM.
+</Info>

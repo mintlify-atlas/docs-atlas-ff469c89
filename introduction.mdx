@@ -1,0 +1,59 @@
+---
+title: "cPanelSniper: cPanel & WHM Authentication Bypass Tool"
+description: "cPanelSniper exploits CVE-2026-41940, a CVSS 10.0 authentication bypass in cPanel & WHM via session-file CRLF injection. No dependencies required."
+---
+
+**cPanelSniper** is a focused exploitation framework for **CVE-2026-41940**, a critical authentication bypass vulnerability in cPanel & WHM. The vulnerability lets unauthenticated remote attackers gain root-level WHM access by injecting CRLF sequences into the on-disk session file via the `Authorization: Basic` HTTP header — no valid credentials required. cPanelSniper automates the complete 4-stage exploit chain and includes an interactive post-exploitation shell, bulk scanning, and pipeline support, all using pure Python 3.8+ stdlib with no external packages.
+
+<Note>
+  cPanelSniper is intended for **authorized penetration testing** and **bug bounty programs only**. Unauthorized access to computer systems is illegal. Always obtain proper written authorization before testing any system.
+</Note>
+
+## What is CVE-2026-41940?
+
+CVE-2026-41940 is a pre-authentication remote code execution vulnerability rooted in `Session.pm`, the session management module in cPanel & WHM. The `saveSession()` function writes session data to disk **before** calling `filter_sessiondata()` for sanitization. This ordering flaw means that CRLF characters embedded in the `Authorization: Basic` header value are written verbatim into the session file on disk, injecting attacker-controlled fields that cPanel then reads back as legitimate session data — granting a fully authenticated root session.
+
+- **CVSS score:** 10.0 (Critical)
+- **In-the-wild exploitation:** Confirmed (April 2026)
+- **Affected installs:** Approximately 70 million domains running cPanel & WHM
+- **Root cause:** `saveSession()` writes the session file before `filter_sessiondata()` sanitizes it
+
+## The CRLF payload
+
+The `Authorization: Basic` value (base64-decoded) injects the following fields directly into the cPanel session file:
+
+```
+root:x
+successful_internal_auth_with_timestamp=9999999999
+user=root
+tfa_verified=1
+hasroot=1
+```
+
+When cPanel reads the session file back, it treats these as legitimate fields and grants full root WHM access without any password check.
+
+## Key capabilities
+
+cPanelSniper covers the full lifecycle from target discovery through post-exploitation:
+
+- **4-stage exploit chain** — canonical hostname discovery, preauth session minting, CRLF injection, and WHM root verification
+- **Interactive WHM shell** — a `mitsec@target ▶` prompt with commands for account listing, file reads, OS command execution, and raw API calls
+- **Bulk scanning** — concurrent multi-target scanning with configurable thread counts and JSON output
+- **Pipeline support** — reads targets from stdin for integration with subfinder, httpx, and Shodan workflows
+- **Post-exploit actions** — list cPanel accounts, change root password, execute OS commands, or create backdoor admin users
+- **No dependencies** — pure Python 3.8+ stdlib; no pip, no requests, no external packages
+
+<CardGroup cols={2}>
+  <Card title="Installation" icon="download" href="/installation">
+    Clone the repository and verify the installation. No pip required.
+  </Card>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Scan your first target and confirm CVE-2026-41940 in under 60 seconds.
+  </Card>
+  <Card title="The vulnerability" icon="bug" href="/vulnerability/overview">
+    Deep dive into the CRLF injection root cause in Session.pm.
+  </Card>
+  <Card title="Post-exploit actions" icon="shield-halved" href="/usage/post-exploit">
+    List accounts, run commands, and drop into an interactive WHM shell.
+  </Card>
+</CardGroup>

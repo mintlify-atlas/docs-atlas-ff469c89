@@ -1,0 +1,97 @@
+---
+title: "Shodan Dorks for Finding cPanel WHM Targets"
+description: "Use these Shodan search queries to identify internet-exposed cPanel & WHM instances on ports 2087 and 2083 for authorized security testing."
+---
+
+Shodan indexes millions of internet-facing services, including cPanel & WHM control panels. The five queries below surface servers that expose WHM on port 2087 (the HTTPS admin interface) or cPanel on port 2083, giving you a focused list of hosts to test during authorized engagements. Each dork targets a different fingerprint, so combining them reduces gaps in your target list before piping into cPanelSniper.
+
+<Warning>
+These queries are for **authorized penetration testing and bug bounty programs only**. Unauthorized access to computer systems is illegal. Always obtain written permission before testing any target.
+</Warning>
+
+## Port reference
+
+cPanel & WHM expose four ports depending on configuration:
+
+| Port | Service | Protocol |
+|------|---------|----------|
+| 2087 | WHM (WebHost Manager) | HTTPS |
+| 2086 | WHM | HTTP |
+| 2083 | cPanel user interface | HTTPS |
+| 2082 | cPanel user interface | HTTP |
+
+For exploitation of CVE-2026-41940, you need WHM access — prefer port **2087** (HTTPS). Port 2086 (HTTP) may also be reachable but redirects to HTTPS in most configurations.
+
+## Shodan dorks
+
+<CodeGroup>
+
+```text WHM login page
+title:"WHM Login"
+```
+
+```text WebHost Manager on port 2087
+title:"WebHost Manager" port:2087
+```
+
+```text cPanel product fingerprint on WHM port
+product:"cPanel" port:2087
+```
+
+```text cPanel user interface on port 2083
+http.title:"cPanel" port:2083
+```
+
+```text SSL certificate subject on WHM port
+ssl.cert.subject.cn:"cPanel" port:2087
+```
+
+</CodeGroup>
+
+### What each dork targets
+
+**`title:"WHM Login"`** — matches any host whose HTTP title contains the string "WHM Login". This is the broadest query and will return results across all ports where WHM is accessible. It relies on Shodan having indexed the page title from a recent crawl.
+
+**`title:"WebHost Manager" port:2087`** — narrows to servers serving the full "WebHost Manager" title specifically on port 2087. Combining the title filter with an explicit port reduces false positives from non-WHM services that happen to include "WebHost Manager" in their content on other ports.
+
+**`product:"cPanel" port:2087`** — uses Shodan's product identification field, which is populated when Shodan's banner-grabbing recognizes cPanel in the server response headers or body. This catches hosts even when the page title is customized.
+
+**`http.title:"cPanel" port:2083`** — targets the cPanel end-user interface rather than WHM. Port 2083 is the HTTPS cPanel login for individual hosting accounts. These hosts are running cPanel and almost certainly also expose WHM on port 2087 — probe port 2087 after discovery.
+
+**`ssl.cert.subject.cn:"cPanel" port:2087`** — searches the SSL certificate's Common Name field. cPanel's self-signed certificates often include "cPanel" in the CN, so this query finds hosts even when their HTTP response has been customized or blocked.
+
+<Tip>
+Run all five queries and deduplicate the results before scanning. cPanelSniper deduplicates targets automatically at line 1031 of `cPanelSniper.py` using `dict.fromkeys`, but removing duplicates in the shell first reduces unnecessary Shodan API credits.
+</Tip>
+
+## Piping Shodan results into cPanelSniper
+
+Shodan's CLI outputs results as space-separated `IP port` pairs when you use `--fields ip_str,port`. The `awk` command below converts that format into `https://IP:port` URLs that cPanelSniper can consume directly from stdin.
+
+```bash
+shodan search --fields ip_str,port 'title:"WHM Login"' | \
+  awk '{print "https://"$1":"$2}' | \
+  python3 cPanelSniper.py -t 30 -o shodan_results.json
+```
+
+The `extract_url` function in `cPanelSniper.py` handles both full `https://` URLs and raw `IP port` pairs from stdin, stripping ANSI escape codes from httpx and similar tools before parsing. Passing URLs explicitly with `awk` is the safer approach when mixing sources.
+
+<Info>
+The `-t 30` flag sets 30 concurrent threads. Start lower (10–15) and increase only if your network and the target infrastructure support it. Use `--rate-limit` to add a delay between targets if you need to avoid triggering rate-limiting defenses.
+</Info>
+
+### Saving results to JSON
+
+Add `-o shodan_results.json` to write all confirmed vulnerable targets to a structured JSON file:
+
+```bash
+shodan search --fields ip_str,port 'product:"cPanel" port:2087' | \
+  awk '{print "https://"$1":"$2}' | \
+  python3 cPanelSniper.py -t 20 -o shodan_results.json
+```
+
+The output file includes the target URL, cPanel version, session token, and the WHM API URL for each confirmed bypass — useful for reporting and evidence collection.
+
+<Note>
+Shodan's free tier limits search results and API calls. Run queries in the Shodan web interface to validate them before scripting bulk downloads with the CLI.
+</Note>

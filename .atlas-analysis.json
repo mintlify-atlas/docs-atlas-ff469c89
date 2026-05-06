@@ -1,28 +1,11 @@
 {
-  "$schema": "https://mintlify.com/docs.json",
-  "name": "cPanelSniper",
+  "projectType": "cli-tool",
+  "projectName": "cPanelSniper",
+  "projectDescription": "A focused exploitation framework for CVE-2026-41940, a critical cPanel & WHM authentication bypass via session-file CRLF injection, enabling unauthenticated root-level WHM access.",
   "theme": "aspen",
-  "colors": {
-    "primary": "#dedede",
-    "light": "#fbde58",
-    "dark": "#dedede"
-  },
-  "favicon": "https://media.brand.dev/b3ea5921-97d6-4dda-9719-2b759af4eb1f.png",
-  "logo": {
-    "light": "https://media.brand.dev/d2aa9377-dc96-447c-87c9-0284e1bca028.png",
-    "dark": "https://media.brand.dev/d2aa9377-dc96-447c-87c9-0284e1bca028.png"
-  },
-  "navbar": {
-    "primary": {
-      "type": "github",
-      "href": "https://github.com/ynsmroztas/cPanelSniper"
-    }
-  },
-  "footer": {
-    "socials": {
-      "github": "https://github.com/ynsmroztas/cPanelSniper"
-    }
-  },
+  "primaryColor": "#dedede",
+  "lightColor": "#fbde58",
+  "darkColor": null,
   "navigation": {
     "tabs": [
       {
@@ -91,5 +74,31 @@
         ]
       }
     ]
-  }
+  },
+  "keyFeatures": [
+    "4-stage automated exploit chain: preauth session → CRLF injection → do_token_denied gadget → WHM root verification",
+    "Interactive WHM shell with built-in commands for account management, file reads, and command execution",
+    "Bulk scanner with multi-threaded concurrency and JSON output for pipeline integration",
+    "Pure Python 3.8+ stdlib — no pip dependencies required",
+    "stdin pipeline support for integration with subfinder, httpx, and Shodan",
+    "Post-exploit actions: list accounts, change root password, execute OS commands, create backdoor admin",
+    "Automatic canonical hostname discovery via cpsrvd 307 redirect"
+  ],
+  "publicApiSurface": [
+    "python3 cPanelSniper.py -u <url>",
+    "python3 cPanelSniper.py -l <list> -t <threads> -o <output.json>",
+    "--action list",
+    "--action passwd --passwd <newpass>",
+    "--action cmd --cmd <command>",
+    "--action exec --cmd <command>",
+    "--action info",
+    "--action version",
+    "--action shell",
+    "--action adduser --new-user <user> --new-domain <domain>",
+    "--hostname <override>",
+    "--timeout <seconds>",
+    "--rate-limit <delay>",
+    "--no-color",
+    "stdin pipe: cat urls.txt | python3 cPanelSniper.py"
+  ]
 }

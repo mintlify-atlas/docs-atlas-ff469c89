@@ -1,0 +1,121 @@
+---
+title: "Discovering cPanel Targets with subfinder and httpx"
+description: "Automate cPanel & WHM target discovery using subfinder for subdomain enumeration and httpx for port probing before scanning with cPanelSniper."
+---
+
+Before cPanelSniper can test for CVE-2026-41940, you need a list of live WHM endpoints. The standard workflow chains `subfinder` for subdomain enumeration with `httpx` for port probing, producing a filtered set of confirmed-live hosts that you pipe directly into cPanelSniper. This page covers how that discovery pipeline works, how cPanelSniper resolves canonical hostnames, and how targets from multiple sources are merged and deduplicated before scanning begins.
+
+<Warning>
+Target discovery and scanning are for **authorized penetration testing and bug bounty programs only**. Unauthorized access to computer systems is illegal. Always obtain written permission before testing any target.
+</Warning>
+
+## Canonical hostname auto-discovery
+
+When cPanelSniper receives a target, it runs a stage 0 discovery step before attempting the exploit. The `stage0_canonical` function sends a `GET` request to `/openid_connect/cpanelid` on the target host. cPanel & WHM servers respond with a `307` redirect whose `Location` header contains the server's canonical hostname — the hostname the server uses in its own authentication cookies and session tokens.
+
+cPanelSniper follows that redirect and extracts the canonical hostname from the `Location` value. Subsequent exploit requests use this canonical hostname in the `Host` header rather than the IP address or subdomain you supplied, which is required for the CRLF auth bypass to work correctly.
+
+### Overriding canonical hostname discovery
+
+If you already know the canonical hostname, or if the target does not issue a `307` redirect, use the `--hostname` flag to skip auto-discovery and supply the hostname directly:
+
+```bash
+python3 cPanelSniper.py -u https://203.0.113.42:2087 --hostname cpanel.target.com
+```
+
+The `--hostname` flag causes `stage0_canonical` to skip the redirect probe and use your supplied value unchanged for all subsequent requests against that target.
+
+## Port reference
+
+cPanel & WHM expose four ports depending on server configuration. For CVE-2026-41940, you need WHM access.
+
+<Tip>
+Prefer port **2087** (WHM HTTPS) for exploitation. Port 2086 (WHM HTTP) may be reachable but typically redirects to HTTPS. Probe both during discovery to avoid missing targets that only respond on one port.
+</Tip>
+
+| Port | Service | Protocol |
+|------|---------|----------|
+| 2087 | WHM (WebHost Manager) | HTTPS |
+| 2086 | WHM (WebHost Manager) | HTTP |
+| 2083 | cPanel user interface | HTTPS |
+| 2082 | cPanel user interface | HTTP |
+
+Hosts that expose cPanel on port 2083 almost always also expose WHM on port 2087 — probe both during discovery and include 2087 in your `httpx` port list.
+
+## Discovery workflow
+
+<Steps>
+  <Step title="Enumerate subdomains with subfinder">
+    Run `subfinder` against the target domain to produce a list of subdomains. The `-silent` flag suppresses banner output so only hostnames reach stdout.
+
+    ```bash
+    subfinder -d target.com -silent
+    ```
+
+    For a program with a pre-built scope file, skip subfinder and start from the file in the next step.
+  </Step>
+
+  <Step title="Probe for live WHM endpoints with httpx">
+    Pipe the subdomain list into `httpx` to filter for hosts that are actively serving WHM on ports 2087 or 2086. `httpx` outputs the full URL (including port) for each live endpoint.
+
+    ```bash
+    subfinder -d target.com -silent | \
+      httpx -silent -ports 2087,2086 -threads 50
+    ```
+
+    `httpx` outputs lines like `https://whm.target.com:2087`. cPanelSniper's `extract_url` function strips any ANSI color codes that `httpx` may include before parsing the URL, so colorized output passes through correctly.
+  </Step>
+
+  <Step title="Pipe live endpoints into cPanelSniper">
+    Add cPanelSniper at the end of the pipeline. It reads the `httpx` output from stdin, runs canonical hostname discovery on each target, and attempts the CVE-2026-41940 bypass.
+
+    ```bash
+    subfinder -d target.com -silent | \
+      httpx -silent -ports 2087,2086 -threads 50 | \
+      python3 cPanelSniper.py -t 30 -o results.json
+    ```
+
+    The `-t 30` flag sets 30 concurrent threads. Start lower (10–15) for unfamiliar targets and increase only if your network and the target infrastructure support it.
+  </Step>
+</Steps>
+
+## Scanning from a scope file
+
+For bug bounty programs where you have a pre-built list of in-scope domains, pipe the file through `httpx` to filter for live WHM ports before scanning:
+
+```bash
+cat scope.txt | \
+  httpx -silent -ports 2087,2086 -threads 100 | \
+  python3 cPanelSniper.py -t 30 -o results.json
+```
+
+You can also supply a target file directly to cPanelSniper with the `-l` flag, bypassing `httpx` entirely if your file already contains confirmed live URLs:
+
+```bash
+python3 cPanelSniper.py -l live_whm_hosts.txt -t 20 -o results.json
+```
+
+## Input modes
+
+cPanelSniper accepts targets from three sources simultaneously. All three are merged before scanning begins.
+
+| Method | Flag / behavior | Example |
+|--------|----------------|---------|
+| Single URL | `-u <url>` | `python3 cPanelSniper.py -u https://target.com:2087` |
+| File list | `-l <file>` | `python3 cPanelSniper.py -l targets.txt` |
+| stdin | Pipe or redirect | `cat urls.txt \| python3 cPanelSniper.py` |
+
+You can combine all three in a single invocation:
+
+```bash
+echo "https://extra.com:2087" | \
+  python3 cPanelSniper.py -u https://target.com:2087 -l more.txt -t 20 -o results.json
+```
+
+## Target deduplication
+
+After collecting targets from all sources, cPanelSniper deduplicates the full list using `dict.fromkeys()` before any scanning begins. This means overlapping results from `subfinder`, a scope file, and `-u` flags will never cause a host to be scanned twice.
+
+<Note>
+The `extract_url` function also handles the raw `IP port` format that Shodan's CLI produces when you use `--fields ip_str,port`, converting each pair to `https://<ip>:<port>` automatically. See [Shodan dorks](/recon/shodan-dorks) for Shodan-specific pipeline examples.
+</Note>

